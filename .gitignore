@@ -1,0 +1,8 @@
+﻿/cmake-build-*
+/.idea
+/.vscode
+/.vs
+/PirateBomb/Assets/Sprites/Individual/
+/.xmake
+/build
+/Intermediate

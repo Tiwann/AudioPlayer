@@ -1,0 +1,11 @@
+﻿file(GLOB_RECURSE AUDIOPLAYER_SOURCES Source/*.cpp Source/*.h)
+
+add_executable(AudioPlayer)
+set_target_properties(AudioPlayer PROPERTIES CXX_STANDARD 23)
+target_sources(AudioPlayer PRIVATE ${AUDIOPLAYER_SOURCES})
+target_link_libraries(AudioPlayer PUBLIC NovaEngine)
+target_compile_definitions(AudioPlayer PRIVATE NOVA_APPLICATION_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+if(CMAKE_BUILD_TYPE MATCHES Release OR CMAKE_BUILD_TYPE MATCHES MinSizeRel)
+    set_target_properties(AudioPlayer PROPERTIES WIN32_EXECUTABLE TRUE)
+endif ()
