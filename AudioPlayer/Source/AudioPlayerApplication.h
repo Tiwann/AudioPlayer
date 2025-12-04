@@ -7,10 +7,12 @@ using Nova::Array;
 using Nova::ApplicationConfiguration;
 using Nova::Ref;
 using Nova::AudioClip;
+using Nova::CmdLineArgs;
 
 class AudioPlayerApplication final : public Application
 {
 public:
+    explicit AudioPlayerApplication(CmdLineArgs&& cmdLineArgs) : Application(std::move(cmdLineArgs)){}
     ApplicationConfiguration GetConfiguration() const override;
     void OnInit() override;
     void OnUpdate(float deltaTime) override;

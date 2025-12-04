@@ -16,6 +16,8 @@
 #include "Rendering/Shader.h"
 #include <imgui.h>
 
+#include "EclipseVisualizer.h"
+
 using namespace Nova;
 
 NOVA_DEFINE_APPLICATION_CLASS(AudioPlayerApplication);
@@ -24,11 +26,11 @@ NOVA_DEFINE_APPLICATION_CLASS(AudioPlayerApplication);
 ApplicationConfiguration AudioPlayerApplication::GetConfiguration() const
 {
     ApplicationConfiguration configuration;
-    configuration.applicationName = "Audio FTT Test App";
+    configuration.applicationName = "Audio Player [Nova Engine]";
     configuration.windowFlags = WindowCreateFlagBits::Default | WindowCreateFlagBits::CreateAtCenter | WindowCreateFlagBits::Resizable;
     configuration.windowWidth = 1600;
     configuration.windowHeight = 900;
-    configuration.vsync = false;
+    configuration.vsync = true;
     return configuration;
 }
 
@@ -37,12 +39,40 @@ static EntityHandle audio = nullptr;
 void AudioPlayerApplication::OnInit()
 {
     Application::OnInit();
-
     AssetDatabase& assetDatabase = GetAssetDatabase();
+    m_Clip = assetDatabase.CreateAsset<AudioClip>("LoadedSound");
 
-    MaterialCreateInfo materialCreateInfo;
-    Ref<Material> material = GetDevice()->CreateMaterial(MaterialCreateInfo().WithShader(assetDatabase.Get<Shader>("BlinnPhongShader")));
-    material->SetTexture("diffuseTex", assetDatabase.Get<Texture>("CheckerTexPlaceholder"));
+    const CmdLineArgs& args = GetProgramArguments();
+    if (args.Count() == 2)
+    {
+        const StringView filepath = args.GetArgument(1);
+        if (filepath.IsEmpty())
+            Exit();
+
+        if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
+            Exit();
+    }
+
+    Ref<DesktopWindow> window = GetWindow();
+    window->OnDropEvent.Bind([this](const Array<StringView>& filepaths)
+    {
+        if (filepaths.IsEmpty()) return;
+        const StringView& filepath = filepaths[0];
+        if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
+            Exit();
+
+        AudioSource* audioSource = audio->GetComponent<AudioSource>();
+        audioSource->Stop();
+        audioSource->SetAudioClip(m_Clip);
+        audioSource->Play();
+    });
+
+    Ref<Device> device = GetDevice();
+    Ref<Shader> blinnPhongShader = assetDatabase.Get<Shader>("BlinnPhongShader");
+    Ref<Texture> checkerTexture = assetDatabase.Get<Texture>("CheckerTexPlaceholder");
+
+    Ref<Material> material = device->CreateMaterial(blinnPhongShader);
+    material->SetTexture("diffuseTex", checkerTexture);
     assetDatabase.AddAsset(material, "CubeMaterial");
 
     Ref<StaticMesh> cubeMesh = assetDatabase.CreateAsset<StaticMesh>("CubeMesh");
@@ -55,12 +85,17 @@ void AudioPlayerApplication::OnInit()
     audio = scene->CreateEntity("Audio");
     audio->AddComponent<AudioListener>();
     AudioSource* audioSource = audio->AddComponent<AudioSource>();
+    audioSource->SetAudioClip(m_Clip);
 
     EntityHandle spectrumEntity = scene->CreateEntity("Spectrum");
     Spectrum* spectrumComponent = spectrumEntity->AddComponent<Spectrum>();
     spectrumComponent->SetAudioSource(audioSource);
     spectrumComponent->SetStaticMesh(cubeMesh);
     spectrumComponent->InitializeSpectrum();
+
+    EntityHandle eclipseEntity = scene->CreateEntity("Eclipse");
+    EclipseVisualizer* eclipseVisualizer = eclipseEntity->AddComponent<EclipseVisualizer>();
+    eclipseVisualizer->SetAudioSource(audioSource);
 
     EntityHandle cameraEntity = scene->CreateEntity("Camera");
     Camera* camera = cameraEntity->AddComponent<Camera>();
@@ -73,10 +108,11 @@ void AudioPlayerApplication::OnInit()
     AmbientLight* ambient = light->AddComponent<AmbientLight>();
     ambient->SetIntensity(0.2f);
 
+    if (m_Clip->IsValid())
+        audioSource->Play();
+
     SceneManager* sceneManager = GetSceneManager();
     sceneManager->LoadScene(scene);
-
-    m_Clip = new AudioClip;
 }
 
 void AudioPlayerApplication::OnUpdate(float deltaTime)
