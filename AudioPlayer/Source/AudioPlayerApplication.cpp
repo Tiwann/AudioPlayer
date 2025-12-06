@@ -89,7 +89,7 @@ void AudioPlayerApplication::OnInit()
     }
 
 
-    EntityHandle visualizerEntity = scene->CreateEntity("Eclipse");
+    EntityHandle visualizerEntity = scene->CreateEntity("2D Bars");
     BarsVisualizer* visualizer = visualizerEntity->AddComponent<BarsVisualizer>();
     visualizer->SetAudioSource(audioSource);
 
@@ -115,10 +115,9 @@ void AudioPlayerApplication::OnUpdate(float deltaTime)
 {
     if (Ref<DesktopWindow> window = GetWindow().As<DesktopWindow>())
     {
-        if (window->GetKeyDown(KeyCode::Space))
+        if (window->GetKeyDown(KeyCode::F11))
         {
-            AudioSource* audioSource = audio->GetComponent<AudioSource>();
-            audioSource->Play();
+            ReloadAllShaders();
         }
     }
 }
@@ -163,6 +162,13 @@ void AudioPlayerApplication::OnGUI()
             ImGui::TextLinkOpenURL("Instagram", "https://instagram.com/prodtiwann");
             ImGui::EndMenu();
         }
+
+        if (ImGui::BeginMenu("Shaders"))
+        {
+            if (ImGui::MenuItem("Reload All"))
+                ReloadAllShaders();
+            ImGui::EndMenu();
+        }
         ImGui::EndMainMenuBar();
     }
 }
@@ -179,4 +185,15 @@ void AudioPlayerApplication::LoadAudioFile(const StringView filepath)
 
     if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
         Exit();
+}
+
+void AudioPlayerApplication::ReloadAllShaders()
+{
+    const SceneManager* sceneManager = GetSceneManager();
+    Scene* scene = sceneManager->GetActiveScene();
+    for (const Entity* entity : scene->GetEntities())
+    {
+        if (Visualizer* visualizer = entity->GetComponent<Visualizer>())
+            visualizer->ReloadPipelines();
+    }
 }

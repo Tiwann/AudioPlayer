@@ -36,13 +36,6 @@ void Visualizer::OnInit()
     const AssetDatabase& assetDatabase = application.GetAssetDatabase();
     m_FullscreenShader = assetDatabase.Get<Shader>("FullscreenShader");
 
-    const ShaderCreateInfo shaderCreateInfo = ShaderCreateInfo()
-    .WithTarget(ShaderTarget::SPIRV)
-    .WithEntryPoints({ShaderEntryPoint("compute", ShaderStageFlagBits::Compute)})
-    .WithModuleInfo({GetObjectName(), Path::GetAssetPath(GetShaderPath())})
-    .WithSlang(application.GetSlangSession());
-    m_VisualizerShader = device->CreateShader(shaderCreateInfo);
-
     const SamplerCreateInfo samplerCreateInfo = SamplerCreateInfo()
     .WithFilter(Filter::Linear, Filter::Linear)
     .WithAddressMode(SamplerAddressMode::Repeat);
@@ -53,8 +46,7 @@ void Visualizer::OnInit()
     m_VisualizerBuffer = device->CreateBuffer(BufferUsage::StorageBuffer, FREQ_BUFFER_SIZE);
 
     window->ResizeEvent.BindMember(this, &Visualizer::OnResize);
-    SetupFullscreenPipeline(width, height);
-    SetupComputePipeline();
+    ReloadPipelines();
 }
 
 void Visualizer::OnDestroy()
@@ -163,6 +155,16 @@ void Visualizer::ReloadPipelines()
     const Application& application = Application::GetCurrentApplication();
     const uint32_t width = application.GetWindowWidth();
     const uint32_t height = application.GetWindowHeight();
+    Ref<Device> device = application.GetDevice();
+
+    if (m_VisualizerShader) m_VisualizerShader->Destroy();
+    const ShaderCreateInfo shaderCreateInfo = ShaderCreateInfo()
+    .WithTarget(ShaderTarget::SPIRV)
+    .WithEntryPoints({ShaderEntryPoint("compute", ShaderStageFlagBits::Compute)})
+    .WithModuleInfo({GetObjectName(), Path::GetAssetPath(GetShaderPath())})
+    .WithSlang(application.GetSlangSession());
+    m_VisualizerShader = device->CreateShader(shaderCreateInfo);
+
     SetupFullscreenPipeline(width, height);
     SetupComputePipeline();
 }

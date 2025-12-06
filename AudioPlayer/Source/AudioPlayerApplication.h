@@ -20,6 +20,7 @@ public:
     void OnDestroy() override;
 
     void LoadAudioFile(Nova::StringView filepath);
+    void ReloadAllShaders();
 private:
     Ref<AudioClip> m_Clip = nullptr;
 };

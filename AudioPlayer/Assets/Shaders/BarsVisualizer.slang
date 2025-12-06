@@ -28,11 +28,18 @@ float getSmoothedFrequency(int index, int radius)
     for (int i = -radius; i <= radius; i++)
     {
         int idx = clamp(index + i, 0, material.fftSize - 1);
-        sum += frequencies[idx] * frequencies[idx];
+        sum += frequencies[idx];
         count++;
     }
 
-    return sqrt(sum / count);
+    return sum / count;
+}
+
+float3 hue(float3 col, float hueAdjust)
+{
+    const float3 k = float3(0.57735, 0.57735, 0.57735);
+    float cosAngle = cos(hueAdjust);
+    return col * cosAngle + cross(k, col) * sin(hueAdjust) + k * dot(k, col) * (1.0 - cosAngle);
 }
 
 float3 drawBars(float2 uv)
@@ -44,7 +51,9 @@ float3 drawBars(float2 uv)
     float easedFreq = smoothstep(0.0, 1.0, freq);
     float halfFreq = easedFreq * 0.5;
     float mask = isBetween(uv.y, 0.5 - halfFreq, 0.5 + halfFreq) ? 1.0 : 0.0;
-    float3 grandient = lerp(green, red, smoothstep(0.0, 1.0, uv.y));
+    float3 lowColor = hue(green, material.time);
+    float3 highColor = hue(red, material.time);
+    float3 grandient = lerp(lowColor, highColor, smoothstep(0.0, 1.0, uv.y)) * easedFreq;
     color = mask * grandient;
 
 	return color;
