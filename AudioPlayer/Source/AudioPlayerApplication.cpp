@@ -12,11 +12,13 @@
 #include "Spectrum.h"
 #include "Components/Rendering/AmbientLight.h"
 #include "Components/Rendering/DirectionalLight.h"
-#include "Containers/StringConversion.h"
 #include "Rendering/Shader.h"
 #include <imgui.h>
 
-#include "EclipseVisualizer.h"
+#include "Visualizers/CubeVisualizer.h"
+#include "Editor/HierarchyWindow.h"
+#include "Editor/InspectorWindow.h"
+#include "Visualizers/BarsVisualizer.h"
 
 using namespace Nova;
 
@@ -44,22 +46,12 @@ void AudioPlayerApplication::OnInit()
 
     const CmdLineArgs& args = GetProgramArguments();
     if (args.Count() == 2)
-    {
-        const StringView filepath = args.GetArgument(1);
-        if (filepath.IsEmpty())
-            Exit();
-
-        if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
-            Exit();
-    }
+        LoadAudioFile(args.GetArgument(1));
 
     Ref<DesktopWindow> window = GetWindow();
     window->OnDropEvent.Bind([this](const Array<StringView>& filepaths)
     {
-        if (filepaths.IsEmpty()) return;
-        const StringView& filepath = filepaths[0];
-        if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
-            Exit();
+        LoadAudioFile(filepaths[0]);
 
         AudioSource* audioSource = audio->GetComponent<AudioSource>();
         audioSource->Stop();
@@ -87,15 +79,19 @@ void AudioPlayerApplication::OnInit()
     AudioSource* audioSource = audio->AddComponent<AudioSource>();
     audioSource->SetAudioClip(m_Clip);
 
-    EntityHandle spectrumEntity = scene->CreateEntity("Spectrum");
-    Spectrum* spectrumComponent = spectrumEntity->AddComponent<Spectrum>();
-    spectrumComponent->SetAudioSource(audioSource);
-    spectrumComponent->SetStaticMesh(cubeMesh);
-    spectrumComponent->InitializeSpectrum();
+    if (false)
+    {
+        EntityHandle spectrumEntity = scene->CreateEntity("Spectrum");
+        Spectrum* spectrumComponent = spectrumEntity->AddComponent<Spectrum>();
+        spectrumComponent->SetAudioSource(audioSource);
+        spectrumComponent->SetStaticMesh(cubeMesh);
+        spectrumComponent->InitializeSpectrum();
+    }
 
-    EntityHandle eclipseEntity = scene->CreateEntity("Eclipse");
-    EclipseVisualizer* eclipseVisualizer = eclipseEntity->AddComponent<EclipseVisualizer>();
-    eclipseVisualizer->SetAudioSource(audioSource);
+
+    EntityHandle visualizerEntity = scene->CreateEntity("Eclipse");
+    BarsVisualizer* visualizer = visualizerEntity->AddComponent<BarsVisualizer>();
+    visualizer->SetAudioSource(audioSource);
 
     EntityHandle cameraEntity = scene->CreateEntity("Camera");
     Camera* camera = cameraEntity->AddComponent<Camera>();
@@ -137,21 +133,34 @@ void AudioPlayerApplication::OnGUI()
             if (ImGui::MenuItem("Open audio file"))
             {
                 const String filepath = Path::OpenFileDialog("Open an audio file...", Path::GetDesktopDirectory(), DialogFilters::AudioFilters, *GetWindow());
+                LoadAudioFile(filepath);
 
                 AudioSource* audioSource = audio->GetComponent<AudioSource>();
-                audioSource->Stop();
-
-                m_Clip->Destroy();
-                if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
-                {
-                    std::wcerr << "Failed to load file: " << StringConvertToWide(filepath) << "\n";
-                }
-
                 auto fft = m_Clip->GetFFTAudioNode();
                 fft->SetFFTWindow(FFTWindow::BlackmanHarris);
+
+                audioSource->Stop();
                 audioSource->SetAudioClip(m_Clip);
+                audioSource->Play();
             }
             if (ImGui::MenuItem("Exit")) Exit();
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Editor"))
+        {
+            Ref<InspectorWindow> inpectorWindow = GetEditorWindow<InspectorWindow>();
+            Ref<HierarchyWindow> hierarchyWindow = GetEditorWindow<HierarchyWindow>();
+            ImGui::MenuItem("Inspector", nullptr, inpectorWindow->GetShownPointer());
+            ImGui::MenuItem("Hierarchy", nullptr, hierarchyWindow->GetShownPointer());
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("About"))
+        {
+            ImGui::TextLinkOpenURL("Github", "https://github.com/tiwann");
+            ImGui::TextLinkOpenURL("Nova Engine", "https://github.com/tiwann/novaengine");
+            ImGui::TextLinkOpenURL("Instagram", "https://instagram.com/prodtiwann");
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -161,4 +170,13 @@ void AudioPlayerApplication::OnGUI()
 void AudioPlayerApplication::OnDestroy()
 {
     Application::OnDestroy();
+}
+
+void AudioPlayerApplication::LoadAudioFile(const StringView filepath)
+{
+    if (filepath.IsEmpty())
+        Exit();
+
+    if (!m_Clip->LoadFromFile(filepath, AudioPlaybackFlagBits::Music | AudioPlaybackFlagBits::ComputeFFT))
+        Exit();
 }

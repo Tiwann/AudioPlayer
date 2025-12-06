@@ -1,7 +1,8 @@
-﻿#include "EclipseVisualizer.h"
+﻿#include "Visualizer.h"
 #include "Runtime/Application.h"
 #include "Runtime/Path.h"
 #include "Runtime/Time.h"
+#include "Runtime/DesktopWindow.h"
 #include "Components/Audio/AudioSource.h"
 #include "Rendering/CommandBuffer.h"
 #include "Rendering/ComputePipeline.h"
@@ -18,12 +19,13 @@
 
 #include <imgui.h>
 
-#include "Runtime/DesktopWindow.h"
-
 using namespace Nova;
 
+static constexpr float FREQ_BUFFER_SIZE = 2048 * sizeof(float);
 
-void EclipseVisualizer::OnInit()
+Visualizer::Visualizer(Entity* owner, const String& name) : Component(owner, name) {}
+
+void Visualizer::OnInit()
 {
     Application& application = Application::GetCurrentApplication();
     Ref<Device>& device = application.GetDevice();
@@ -37,7 +39,7 @@ void EclipseVisualizer::OnInit()
     const ShaderCreateInfo shaderCreateInfo = ShaderCreateInfo()
     .WithTarget(ShaderTarget::SPIRV)
     .WithEntryPoints({ShaderEntryPoint("compute", ShaderStageFlagBits::Compute)})
-    .WithModuleInfo({"EclipseVisualizer", Path::GetAssetPath("Shaders/EclipseVisualizer.slang")})
+    .WithModuleInfo({GetObjectName(), Path::GetAssetPath(GetShaderPath())})
     .WithSlang(application.GetSlangSession());
     m_VisualizerShader = device->CreateShader(shaderCreateInfo);
 
@@ -46,12 +48,16 @@ void EclipseVisualizer::OnInit()
     .WithAddressMode(SamplerAddressMode::Repeat);
     m_Sampler = device->CreateSampler(samplerCreateInfo);
 
-    window->ResizeEvent.BindMember(this, &EclipseVisualizer::OnResize);
+    m_StagingBuffer = device->CreateBuffer(BufferUsage::StagingBuffer, FREQ_BUFFER_SIZE);
+    m_StagingBuffer->Memset(0, FREQ_BUFFER_SIZE);
+    m_VisualizerBuffer = device->CreateBuffer(BufferUsage::StorageBuffer, FREQ_BUFFER_SIZE);
+
+    window->ResizeEvent.BindMember(this, &Visualizer::OnResize);
     SetupFullscreenPipeline(width, height);
     SetupComputePipeline();
 }
 
-void EclipseVisualizer::OnDestroy()
+void Visualizer::OnDestroy()
 {
     Application& application = Application::GetCurrentApplication();
     Ref<Device>& device = application.GetDevice();
@@ -65,29 +71,30 @@ void EclipseVisualizer::OnDestroy()
     m_Texture->Destroy();
     m_Sampler->Destroy();
     m_VisualizerBuffer->Destroy();
+    m_StagingBuffer->Destroy();
 }
 
-void EclipseVisualizer::OnUpdate(float deltaTime)
+void Visualizer::OnUpdate(float deltaTime)
 {
-    Application& application = Application::GetCurrentApplication();
-    auto window = application.GetWindow().As<DesktopWindow>();
-    if (window->GetKeyDown(KeyCode::F1))
+    const BufferView<float> frequencies = m_AudioSource->GetFrequencies();
+    for (size_t freqIndex = 0; freqIndex < frequencies.Count(); ++freqIndex)
     {
-        SetupFullscreenPipeline(window->GetWidth(), window->GetHeight());
-        SetupComputePipeline();
+        const float targetFreq = frequencies[freqIndex];
+        const float currentFreq = m_SmoothedFreqs[freqIndex];
+        const float alpha = 1.0f - Math::Exp((-1.0f / m_SmoothTime) * deltaTime);
+        const float smoothedFreq = Math::Lerp(currentFreq, targetFreq, alpha);
+        m_SmoothedFreqs[freqIndex] = targetFreq > currentFreq ? targetFreq : smoothedFreq;
     }
+
+    m_StagingBuffer->CPUCopy(BufferView<float>(m_SmoothedFreqs, frequencies.Count()), 0);
 }
 
-void EclipseVisualizer::OnPreRender(CommandBuffer& cmdBuffer)
+void Visualizer::OnPreRender(CommandBuffer& cmdBuffer)
 {
-    BufferView<float> frequencies = m_AudioSource->GetFrequencies();
-    Array<float> frequenciesSmoothed(frequencies.Data(), frequencies.Count());
-
-    if (!frequencies.IsNullOrEmpty())
-        cmdBuffer.UpdateBuffer(*m_VisualizerBuffer, 0, frequencies.Size(), frequencies.Data());
-
+    cmdBuffer.BufferCopy(*m_StagingBuffer, *m_VisualizerBuffer, 0, 0, FREQ_BUFFER_SIZE);
     cmdBuffer.BindComputePipeline(*m_VisualizerPipeline);
     cmdBuffer.BindShaderBindingSet(*m_VisualizerShader, *m_VisualizerBindingSet);
+
 
     VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     barrier.image = m_Texture.As<Vulkan::Texture>()->GetImage();
@@ -111,23 +118,10 @@ void EclipseVisualizer::OnPreRender(CommandBuffer& cmdBuffer)
     const uint32_t numGroupsX = (m_Texture->GetWidth() + workGroupSizeX - 1) / workGroupSizeX;
     const uint32_t numGroupsY = (m_Texture->GetHeight() + workGroupSizeY - 1) / workGroupSizeY;
 
-    struct MaterialParameters
-    {
-        float iTime;
-        float freqRange = 64.0;
-        float radius = 0.6;
-        float brightness = 0.2;
-        float speed = 0.2;
-    } const materialParameters
-    {
-        (float)Time::Get(),
-        m_FreqRange,
-        m_Radius,
-        m_Brightness,
-        m_Speed
-    };
-
-    cmdBuffer.PushConstants(*m_VisualizerShader, ShaderStageFlagBits::Compute, 0, sizeof(MaterialParameters), &materialParameters);
+    m_PushConstants.Seek(Seek::Begin, 0);
+    WritePushConstants(m_PushConstants);
+    if (m_PushConstants.Size() > 0)
+        cmdBuffer.PushConstants(*m_VisualizerShader, ShaderStageFlagBits::Compute, 0, m_PushConstants.Size(), m_PushConstants.Data());
     cmdBuffer.Dispatch(numGroupsX, numGroupsY, 1);
 
     VkImageMemoryBarrier barrier2 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -147,7 +141,7 @@ void EclipseVisualizer::OnPreRender(CommandBuffer& cmdBuffer)
     m_Texture.As<Vulkan::Texture>()->SetImageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-void EclipseVisualizer::OnRender(CommandBuffer& cmdBuffer)
+void Visualizer::OnRender(CommandBuffer& cmdBuffer)
 {
     cmdBuffer.BindGraphicsPipeline(*m_FullscreenPipeline);
     cmdBuffer.BindShaderBindingSet(*m_FullscreenShader, *m_FullscreenBindingSet);
@@ -159,15 +153,21 @@ void EclipseVisualizer::OnRender(CommandBuffer& cmdBuffer)
     cmdBuffer.Draw(6, 1, 0, 0);
 }
 
-void EclipseVisualizer::OnGui()
+void Visualizer::OnGui()
 {
-    ImGui::DragFloat("Frenquencies Range", &m_FreqRange, 0.01f, 0, 0, "%.2f");
-    ImGui::DragFloat("Radius", &m_Radius, 0.01f, 0, 0, "%.2f");
-    ImGui::DragFloat("Brightness", &m_Brightness, 0.01f, 0, 0, "%.2f");
-    ImGui::DragFloat("Speed", &m_Speed, 0.01f, 0, 0, "%.2f");
+    ImGui::DragFloat("Smooth Time", &m_SmoothTime, 0.01, 0, 0, "%.2f");
 }
 
-void EclipseVisualizer::SetupFullscreenPipeline(uint32_t width, uint32_t height)
+void Visualizer::ReloadPipelines()
+{
+    const Application& application = Application::GetCurrentApplication();
+    const uint32_t width = application.GetWindowWidth();
+    const uint32_t height = application.GetWindowHeight();
+    SetupFullscreenPipeline(width, height);
+    SetupComputePipeline();
+}
+
+void Visualizer::SetupFullscreenPipeline(uint32_t width, uint32_t height)
 {
     Application& application = Application::GetCurrentApplication();
     AssetDatabase& assetDatabase = application.GetAssetDatabase();
@@ -188,13 +188,13 @@ void EclipseVisualizer::SetupFullscreenPipeline(uint32_t width, uint32_t height)
     .SetScissorInfo({0, 0, width, height})
     .SetMultisampleInfo({8});
 
-    m_Texture = device->CreateTexture(TextureUsageFlagBits::Storage | TextureUsageFlagBits::Sampled, 2 * width, 2 * height, Format::R32G32B32A32_FLOAT);
+    m_Texture = device->CreateTexture(TextureUsageFlagBits::Storage | TextureUsageFlagBits::Sampled, width, height, Format::R32G32B32A32_FLOAT);
     m_FullscreenBindingSet = m_FullscreenShader->CreateBindingSet();
     m_FullscreenPipeline = device->CreateGraphicsPipeline(gpCreateInfo);
     m_FullscreenBindingSet->BindCombinedSamplerTexture(0, m_Sampler, m_Texture);
 }
 
-void EclipseVisualizer::SetupComputePipeline()
+void Visualizer::SetupComputePipeline()
 {
     Application& application = Application::GetCurrentApplication();
     Ref<Device>& device = application.GetDevice();
@@ -202,22 +202,26 @@ void EclipseVisualizer::SetupComputePipeline()
 
     if (m_VisualizerPipeline) m_VisualizerPipeline->Destroy();
     if (m_VisualizerBindingSet) m_VisualizerBindingSet->Destroy();
-    if (m_VisualizerBuffer) m_VisualizerBuffer->Destroy();
 
     m_VisualizerPipeline = device->CreateComputePipeline(m_VisualizerShader);
-    m_VisualizerBuffer = device->CreateBuffer(BufferUsage::UniformBuffer, 2048 * sizeof(float));
     m_VisualizerBindingSet = m_VisualizerShader->CreateBindingSet();
     m_VisualizerBindingSet->BindTexture(0, m_Texture);
-    m_VisualizerBindingSet->BindBuffer(1, m_VisualizerBuffer, 0, 2048 * sizeof(float));
+    m_VisualizerBindingSet->BindBuffer(1, m_VisualizerBuffer, 0, FREQ_BUFFER_SIZE);
 }
 
-void EclipseVisualizer::OnResize(const uint32_t newWidth, const uint32_t newHeight)
+
+void Visualizer::OnResize(const uint32_t newWidth, const uint32_t newHeight)
 {
     SetupFullscreenPipeline(newWidth, newHeight);
     SetupComputePipeline();
 }
 
-void EclipseVisualizer::SetAudioSource(AudioSource* audioSource)
+void Visualizer::SetAudioSource(AudioSource* audioSource)
 {
     m_AudioSource = audioSource;
+}
+
+AudioSource* Visualizer::GetAudioSource()
+{
+    return m_AudioSource;
 }

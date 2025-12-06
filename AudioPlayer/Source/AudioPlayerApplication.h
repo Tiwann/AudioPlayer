@@ -18,6 +18,8 @@ public:
     void OnUpdate(float deltaTime) override;
     void OnGUI() override;
     void OnDestroy() override;
+
+    void LoadAudioFile(Nova::StringView filepath);
 private:
     Ref<AudioClip> m_Clip = nullptr;
 };

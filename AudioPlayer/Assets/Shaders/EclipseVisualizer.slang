@@ -25,7 +25,7 @@ struct AudioData
 
 [[vk::push_constant]] uniform MaterialParameters material;
 
-[[vk::binding(0, 0)]] RWTexture2D<float4> texture;
+[[vk::binding(0, 0)]] RWTexture2D texture;
 [[vk::binding(1, 0)]] ConstantBuffer<AudioData> audioData;
 
 
@@ -80,7 +80,8 @@ vec3 doHalo(vec2 fragment, float radius)
 	return col;
 }
 
-vec3 doLine(vec2 fragment, float radius, float x) {
+vec3 doLine(vec2 fragment, float radius, float x)
+{
 	vec3 col = hsv2rgb(vec3(x * 0.23 + material.iTime * 0.12, 1.0, 1.0));
 	
 	float freq = abs(fragment.x * 0.5);
@@ -108,27 +109,27 @@ vec4 toLinear(vec4 color)
 
 vec3 reinhard(vec3 v)
 {
-    return v / (1.0f + v);
+    return v / (1.0 + v);
 }
 
 static const mat3 aces_input_matrix =
     {
-        vec3(0.59719f, 0.35458f, 0.04823f),
-        vec3(0.07600f, 0.90834f, 0.01566f),
-        vec3(0.02840f, 0.13383f, 0.83777f)
+        vec3(0.59719, 0.35458, 0.04823),
+        vec3(0.07600, 0.90834, 0.01566),
+        vec3(0.02840, 0.13383, 0.83777)
     };
 
 static const mat3 aces_output_matrix =
     {
-        vec3(1.60475f, -0.53108f, -0.07367f),
-        vec3(-0.10208f, 1.10813f, -0.00605f),
-        vec3(-0.00327f, -0.07276f, 1.07602f)
+        vec3(1.60475, -0.53108, -0.07367),
+        vec3(-0.10208, 1.10813, -0.00605),
+        vec3(-0.00327, -0.07276, 1.07602)
     };
 
 vec3 rtt_and_odt_fit(vec3 v)
 {
-    vec3 a = v * (v + 0.0245786f) - 0.000090537f;
-    vec3 b = v * (0.983729f * v + 0.4329510f) + 0.238081f;
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
     return a / b;
 }
 
@@ -145,7 +146,7 @@ vec4 mainImage(vec2 fragCoord, vec2 texSize)
     fragPos = (fragPos - 0.5) * 2.0;
     fragPos.x *= texSize.x / texSize.y;
 
-    vec3 color = vec3(0.0134, 0.052, 0.1);
+    vec3 color = vec3(0.0);
     color += doHalo(fragPos, material.radius);
 
 	/* if(material.showHorizontal)
@@ -155,7 +156,7 @@ vec4 mainImage(vec2 fragCoord, vec2 texSize)
 	} */
 
     color += max(luma(color) - 1.0, 0.0);
-    return vec4(aces_fitted(color), 1.0);
+    return vec4(color, 1.0);
 }
 
 [shader("compute")]
@@ -165,10 +166,10 @@ void compute(uint3 threadId: SV_DispatchThreadID)
 	uint2 screenPos = threadId.xy;
 	float texWidth = 0, texHeight = 0;
 	texture.GetDimensions(texWidth, texHeight);
+
 	if (screenPos.x >= texWidth || screenPos.y >= texHeight)
 		return;
 
-	float2 texSize = float2(texWidth, texHeight);
-	float4 color = mainImage(screenPos, texSize);
+	float4 color = mainImage(screenPos, float2(texWidth, texHeight));
 	texture[screenPos] = color;
 }
